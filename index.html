@@ -308,7 +308,7 @@
     </div>
 
     <script>
-        const GAS_URL = 'https://script.google.com/macros/s/AKfycbyBkHSF52aP0NYez2tUosevAgYnv5a6Fi9iqgH6V5Q9zKJ6Qh-k-dE-SEmUf391nVol/exec';
+        const GAS_URL = 'https://script.google.com/macros/s/AKfycbx6mP4ymLLCUR5rEAQcYzfp2LZleU01hbGUu1AS3e5ctNmusZ5dmX5HNPpqIYBF8rnZ/exec';
         const subjects = ["Bahasa Indonesia", "Pendidikan Pancasila", "Matematika", "IPAS", "Seni Rupa", "Koding Kecerdasan Artifisial"];
         
         const studentPins = {
@@ -371,6 +371,7 @@
                 document.getElementById('student-dashboard').classList.remove('hidden');
                 document.getElementById('welcome-siswa').innerText = `Halo, ${name}! Semangat belajar hari ini!`;
                 
+                loadServerData();
                 renderSubjects();
                 renderJadwal();
                 renderPengumuman();
@@ -389,6 +390,7 @@
                 document.getElementById('teacher-dashboard').classList.remove('hidden');
                 populateSiswaDropdown();
                 loadJadwalToForm();
+                loadServerData();
             } else {
                 alert("PIN Rahasia Guru salah!");
             }
@@ -456,6 +458,7 @@
             dataNilai[jenis][mapel] = nilai;
 
             localStorage.setItem(key, JSON.stringify(dataNilai));
+            saveToServer(key, dataNilai);
             alert(`Berhasil! Nilai ${jenis} untuk ${siswa} pada mapel ${mapel} telah disimpan.`);
             
             kirimDataKeSpreadsheet(siswa, mapel, `Nilai Sumatif (${jenis})`, nilai);
@@ -509,9 +512,10 @@
                 reader.onload = function(e) {
                     const imgData = e.target.result;
                     const payload = { text: isi, img: imgData };
+                    const key = (jenis === "Materi") ? `custom_materi_${mapel}` : `custom_tugas_${mapel}`;
                     
-                    if(jenis === "Materi") localStorage.setItem(`custom_materi_${mapel}`, JSON.stringify(payload));
-                    else if(jenis === "Tugas") localStorage.setItem(`custom_tugas_${mapel}`, JSON.stringify(payload));
+                    localStorage.setItem(key, JSON.stringify(payload));
+                    saveToServer(key, payload);
 
                     alert(`${jenis} ber-gambar untuk ${mapel} telah berhasil diterbitkan!`);
                     kirimDataKeSpreadsheet("GURU", mapel, `Terbit ${jenis}`, isi, imgData, "materi.jpg", "image/jpeg");
@@ -521,8 +525,10 @@
                 reader.readAsDataURL(fileInput.files[0]);
             } else {
                 const payload = { text: isi, img: null };
-                if(jenis === "Materi") localStorage.setItem(`custom_materi_${mapel}`, JSON.stringify(payload));
-                else if(jenis === "Tugas") localStorage.setItem(`custom_tugas_${mapel}`, JSON.stringify(payload));
+                const key = (jenis === "Materi") ? `custom_materi_${mapel}` : `custom_tugas_${mapel}`;
+                
+                localStorage.setItem(key, JSON.stringify(payload));
+                saveToServer(key, payload);
 
                 alert(`${jenis} untuk ${mapel} telah berhasil diterbitkan!`);
                 kirimDataKeSpreadsheet("GURU", mapel, `Terbit ${jenis}`, isi);
@@ -580,6 +586,7 @@
             };
 
             localStorage.setItem("custom_jadwal_harian", JSON.stringify(jadwalObj));
+            saveToServer("custom_jadwal_harian", jadwalObj);
             alert("Jadwal pelajaran harian berhasil diperbarui!");
             kirimDataKeSpreadsheet("GURU", "Sistem", "Update Jadwal", JSON.stringify(jadwalObj));
         }
@@ -658,6 +665,7 @@
             const text = document.getElementById('admin-pengumuman-text').value.trim();
             if(!text) return alert("Isi pengumuman terlebih dahulu!");
             localStorage.setItem("custom_pengumuman", text);
+            saveToServer("custom_pengumuman", text);
             alert("Pengumuman berhasil diterbitkan!");
             kirimDataKeSpreadsheet("GURU", "Pengumuman", "Terbit Pengumuman", text);
         }
@@ -676,6 +684,7 @@
             let existingQuiz = JSON.parse(localStorage.getItem(`custom_pg_quiz_${mapel}`)) || [];
             existingQuiz.push({ q: soal, opt: [optA, optB, optC, optD], ans: kunci });
             localStorage.setItem(`custom_pg_quiz_${mapel}`, JSON.stringify(existingQuiz));
+            saveToServer(`custom_pg_quiz_${mapel}`, existingQuiz);
 
             alert(`Soal ditambahkan ke Kuis ${mapel}. Total: ${existingQuiz.length}`);
             kirimDataKeSpreadsheet("GURU", mapel, "Terbit Kuis", JSON.stringify(existingQuiz));
@@ -774,6 +783,38 @@
             alert(`Kuis selesai! Kamu menjawab benar ${correctCount} dari ${questions.length} soal.\nNilai Kamu: ${nilai}`);
             kirimDataKeSpreadsheet(currentUser, currentMapel, 'Kuis PG', nilai);
             checkKuisStatus();
+        }
+
+        // SYNC DENGAN SPREADSHEET (Dua Arah)
+        function saveToServer(key, value) {
+            fetch(GAS_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify({ action: "saveGuruContent", key: key, value: value })
+            })
+            .then(res => res.json())
+            .then(data => console.log("Konten tersimpan di server:", data))
+            .catch(err => console.error("Gagal simpan ke server:", err));
+        }
+
+        function loadServerData() {
+            fetch(GAS_URL)
+            .then(res => res.json())
+            .then(data => {
+                if(data && typeof data === 'object') {
+                    Object.keys(data).forEach(key => {
+                        localStorage.setItem(key, typeof data[key] === 'object' ? JSON.stringify(data[key]) : data[key]);
+                    });
+                    if(currentMapel) {
+                        renderMateriSiswa();
+                        renderTugasSiswa();
+                    }
+                    renderJadwal();
+                    renderPengumuman();
+                    if(currentUser) renderNilaiSumatifSiswa();
+                }
+            })
+            .catch(err => console.error("Gagal memuat data server:", err));
         }
 
         function kirimDataKeSpreadsheet(nama, mapel, jenis, nilai, fileBase64 = null, fileName = null, fileMimeType = null) {
